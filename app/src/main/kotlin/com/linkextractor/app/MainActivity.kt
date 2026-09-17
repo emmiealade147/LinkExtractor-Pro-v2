@@ -1,414 +1,329 @@
 package com.linkextractor.app
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
+import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+import android.widget.Button
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONTokener
 import java.net.URI
 
-class MainActivity : ComponentActivity() {
+class MainActivity : Activity() {
 
-    private var browser: WebView? = null
+    private lateinit var web: WebView
+    private lateinit var urlBox: EditText
+    private lateinit var status: TextView
+    private lateinit var countText: TextView
+    private lateinit var results: TextView
 
-    private val links = mutableStateListOf<String>()
+    private val links = mutableListOf<String>()
 
-    private var currentUrl by mutableStateOf("")
-    private var status by mutableStateOf("Enter a website address")
-    private var tab by mutableIntStateOf(0)
-    private var searchText by mutableStateOf("")
-    private var httpsOnly by mutableStateOf(false)
-    private var externalOnly by mutableStateOf(false)
+    private var httpsOnly = false
+    private var externalOnly = false
+    private var currentUrl = ""
 
-    private val saveTxt = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/plain")
-    ) { uri ->
-        if (uri != null) {
-            writeFile(uri, links.joinToString("\n"))
-        }
-    }
-
-    private val saveCsv = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri ->
-        if (uri != null) {
-            val csv = "URL\n" + links.joinToString("\n") {
-                "\"" + it.replace("\"", "\"\"") + "\""
-            }
-            writeFile(uri, csv)
-        }
-    }
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        setContent {
-            App()
-        }
+        buildScreen()
 
         val incoming = intent?.data?.toString()
 
         if (!incoming.isNullOrBlank()) {
-            currentUrl = incoming
+            urlBox.setText(incoming)
+            loadPage(incoming)
         }
     }
 
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    private fun App() {
+    private fun buildScreen() {
 
-        MaterialTheme {
+        val root = LinearLayout(this)
 
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = {
-                            Text("Link Extractor Pro")
-                        }
-                    )
-                }
-            ) { padding ->
+        root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(Color.WHITE)
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                ) {
+        val title = TextView(this)
 
-                    TabRow(
-                        selectedTabIndex = tab
-                    ) {
+        title.text = "Link Extractor Pro"
+        title.textSize = 26f
+        title.setTextColor(Color.rgb(30, 20, 30))
+        title.setPadding(20, 18, 20, 18)
 
-                        Tab(
-                            selected = tab == 0,
-                            onClick = {
-                                tab = 0
-                            },
-                            text = {
-                                Text("Browser")
-                            }
-                        )
+        root.addView(
+            title,
+            LinearLayout.LayoutParams(
+                -1,
+                -2
+            )
+        )
 
-                        Tab(
-                            selected = tab == 1,
-                            onClick = {
-                                tab = 1
-                            },
-                            text = {
-                                Text("Links (${filteredLinks().size})")
-                            }
-                        )
-                    }
+        val urlRow = LinearLayout(this)
 
-                    if (tab == 0) {
-                        BrowserScreen()
-                    } else {
-                        LinksScreen()
-                    }
-                }
+        urlRow.orientation = LinearLayout.HORIZONTAL
+        urlRow.setPadding(10, 5, 10, 5)
+
+        urlBox = EditText(this)
+
+        urlBox.hint = "https://example.com"
+        urlBox.singleLine = true
+
+        urlRow.addView(
+            urlBox,
+            LinearLayout.LayoutParams(
+                0,
+                -2,
+                1f
+            )
+        )
+
+        val go = Button(this)
+
+        go.text = "GO"
+
+        go.setOnClickListener {
+
+            var url = urlBox.text.toString().trim()
+
+            if (url.isBlank()) {
+                status.text = "Enter a website address"
+                return@setOnClickListener
             }
+
+            if (
+                !url.startsWith("http://") &&
+                !url.startsWith("https://")
+            ) {
+                url = "https://$url"
+            }
+
+            loadPage(url)
         }
-    }
 
-    @Composable
-    private fun BrowserScreen() {
+        urlRow.addView(
+            go,
+            LinearLayout.LayoutParams(
+                -2,
+                -2
+            )
+        )
 
-        var address by remember {
-            mutableStateOf(currentUrl)
+        root.addView(urlRow)
+
+        val buttonRow = LinearLayout(this)
+
+        buttonRow.gravity = Gravity.CENTER_VERTICAL
+        buttonRow.setPadding(10, 2, 10, 2)
+
+        val scan = Button(this)
+
+        scan.text = "Scan"
+
+        scan.setOnClickListener {
+            scanPage()
         }
 
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
+        buttonRow.addView(scan)
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp)
+        val deep = Button(this)
+
+        deep.text = "Deep Scan"
+
+        deep.setOnClickListener {
+            deepScan()
+        }
+
+        buttonRow.addView(deep)
+
+        val copy = Button(this)
+
+        copy.text = "Copy All"
+
+        copy.setOnClickListener {
+            copyLinks()
+        }
+
+        buttonRow.addView(copy)
+
+        root.addView(buttonRow)
+
+        val filterRow = LinearLayout(this)
+
+        filterRow.orientation = LinearLayout.HORIZONTAL
+        filterRow.setPadding(10, 2, 10, 2)
+
+        val https = CheckBox(this)
+
+        https.text = "HTTPS only"
+
+        https.setOnCheckedChangeListener { _, checked ->
+            httpsOnly = checked
+            showResults()
+        }
+
+        filterRow.addView(https)
+
+        val external = CheckBox(this)
+
+        external.text = "External only"
+
+        external.setOnCheckedChangeListener { _, checked ->
+            externalOnly = checked
+            showResults()
+        }
+
+        filterRow.addView(external)
+
+        root.addView(filterRow)
+
+        status = TextView(this)
+
+        status.text = "Enter a URL and tap GO"
+        status.textSize = 15f
+        status.setTextColor(Color.DKGRAY)
+        status.setPadding(12, 6, 12, 6)
+
+        root.addView(
+            status,
+            LinearLayout.LayoutParams(
+                -1,
+                -2
+            )
+        )
+
+        countText = TextView(this)
+
+        countText.text = "0 links"
+        countText.textSize = 18f
+        countText.setTextColor(Color.BLACK)
+        countText.setPadding(12, 4, 12, 8)
+
+        root.addView(countText)
+
+        web = WebView(this)
+
+        web.settings.javaScriptEnabled = true
+        web.settings.domStorageEnabled = true
+        web.settings.loadsImagesAutomatically = true
+        web.settings.databaseEnabled = true
+
+        web.webViewClient = object : WebViewClient() {
+
+            override fun onPageFinished(
+                view: WebView?,
+                url: String?
             ) {
 
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = {
-                        address = it
+                if (!url.isNullOrBlank()) {
+                    currentUrl = url
+                    urlBox.setText(url)
+                }
+
+                status.text = "Page loaded. Scanning..."
+
+                handler.postDelayed(
+                    {
+                        scanPage()
                     },
-                    label = {
-                        Text("Website URL")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
+                    1500
                 )
-
-                Spacer(
-                    modifier = Modifier.width(8.dp)
-                )
-
-                Button(
-                    onClick = {
-
-                        var url = address.trim()
-
-                        if (
-                            !url.startsWith("http://") &&
-                            !url.startsWith("https://")
-                        ) {
-                            url = "https://$url"
-                        }
-
-                        currentUrl = url
-                        status = "Loading page..."
-
-                        browser?.loadUrl(url)
-                    }
-                ) {
-                    Text("Go")
-                }
             }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-            ) {
-
-                Button(
-                    onClick = {
-                        browser?.reload()
-                    }
-                ) {
-                    Text("Scan Again")
-                }
-
-                Spacer(
-                    modifier = Modifier.width(8.dp)
-                )
-
-                Button(
-                    onClick = {
-                        deepScan()
-                    }
-                ) {
-                    Text("Deep Scan")
-                }
-            }
-
-            Text(
-                text = status,
-                modifier = Modifier.padding(8.dp)
-            )
-
-            AndroidView(
-                factory = { context ->
-
-                    WebView(context).apply {
-
-                        browser = this
-
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.loadsImagesAutomatically = true
-                        settings.databaseEnabled = true
-
-                        webViewClient = object : WebViewClient() {
-
-                            override fun onPageFinished(
-                                view: WebView?,
-                                url: String?
-                            ) {
-
-                                currentUrl = url ?: currentUrl
-                                status = "Page loaded. Scanning..."
-
-                                Handler(
-                                    Looper.getMainLooper()
-                                ).postDelayed(
-                                    {
-                                        scanPage()
-                                    },
-                                    1200
-                                )
-                            }
-                        }
-
-                        if (currentUrl.isNotBlank()) {
-                            loadUrl(currentUrl)
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
         }
+
+        root.addView(
+            web,
+            LinearLayout.LayoutParams(
+                -1,
+                0,
+                1f
+            )
+        )
+
+        results = TextView(this)
+
+        results.textSize = 14f
+        results.setTextColor(Color.DKGRAY)
+        results.setPadding(12, 12, 12, 12)
+
+        val scroll = ScrollView(this)
+
+        scroll.addView(results)
+
+        root.addView(
+            scroll,
+            LinearLayout.LayoutParams(
+                -1,
+                0,
+                0f
+            )
+        )
+
+        setContentView(root)
     }
 
-    @Composable
-    private fun LinksScreen() {
+    private fun loadPage(url: String) {
 
-        val visible = filteredLinks()
+        currentUrl = url
 
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
+        urlBox.setText(url)
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp)
-            ) {
+        status.text = "Loading page..."
 
-                Button(
-                    onClick = {
-                        copyAll()
-                    }
-                ) {
-                    Text("Copy All")
-                }
+        links.clear()
 
-                Spacer(
-                    modifier = Modifier.width(8.dp)
-                )
+        showResults()
 
-                Button(
-                    onClick = {
-                        saveTxt.launch("extracted-links.txt")
-                    }
-                ) {
-                    Text("TXT")
-                }
-
-                Spacer(
-                    modifier = Modifier.width(8.dp)
-                )
-
-                Button(
-                    onClick = {
-                        saveCsv.launch("extracted-links.csv")
-                    }
-                ) {
-                    Text("CSV")
-                }
-            }
-
-            OutlinedTextField(
-                value = searchText,
-                onValueChange = {
-                    searchText = it
-                },
-                label = {
-                    Text("Search links")
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
-                singleLine = true
-            )
-
-            Row(
-                modifier = Modifier.padding(
-                    horizontal = 8.dp
-                )
-            ) {
-
-                Checkbox(
-                    checked = httpsOnly,
-                    onCheckedChange = {
-                        httpsOnly = it
-                    }
-                )
-
-                Text(
-                    text = "HTTPS only",
-                    modifier = Modifier.padding(top = 12.dp)
-                )
-
-                Spacer(
-                    modifier = Modifier.width(12.dp)
-                )
-
-                Checkbox(
-                    checked = externalOnly,
-                    onCheckedChange = {
-                        externalOnly = it
-                    }
-                )
-
-                Text(
-                    text = "External only",
-                    modifier = Modifier.padding(top = 12.dp)
-                )
-            }
-
-            Text(
-                text = "${visible.size} links found",
-                modifier = Modifier.padding(8.dp)
-            )
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize()
-            ) {
-
-                items(visible) { url ->
-
-                    Text(
-                        text = url,
-                        modifier = Modifier.padding(
-                            horizontal = 12.dp,
-                            vertical = 7.dp
-                        )
-                    )
-
-                    HorizontalDivider()
-                }
-            }
-        }
+        web.loadUrl(url)
     }
 
     private fun scanPage() {
 
-        val w = browser ?: return
+        status.text = "Extracting links..."
 
-        w.evaluateJavascript(
+        web.evaluateJavascript(
             """
             (function() {
 
-                var result = [];
+                var found = [];
 
                 document
-                    .querySelectorAll('a[href], area[href]')
+                    .querySelectorAll("a[href], area[href]")
                     .forEach(function(e) {
-                        result.push(e.href);
+                        if (e.href) {
+                            found.push(e.href);
+                        }
                     });
 
                 document
                     .querySelectorAll(
-                        '[data-url],[data-href],[data-link]'
+                        "[data-url],[data-href],[data-link]"
                     )
                     .forEach(function(e) {
 
                         if (e.dataset.url)
-                            result.push(e.dataset.url);
+                            found.push(e.dataset.url);
 
                         if (e.dataset.href)
-                            result.push(e.dataset.href);
+                            found.push(e.dataset.href);
 
                         if (e.dataset.link)
-                            result.push(e.dataset.link);
+                            found.push(e.dataset.link);
                     });
 
                 var html =
@@ -422,23 +337,24 @@ class MainActivity : ComponentActivity() {
                 while (
                     (match = regex.exec(html)) !== null
                 ) {
-                    result.push(match[0]);
+                    found.push(match[0]);
                 }
 
-                return JSON.stringify(result);
+                return JSON.stringify(found);
 
             })()
             """.trimIndent()
-        ) { raw: String ->
+        ) { result ->
 
             try {
 
                 val json =
-                    JSONTokener(raw).nextValue() as String
+                    JSONTokener(result).nextValue() as String
 
                 val array = JSONArray(json)
 
-                val found = mutableListOf<String>()
+                val newLinks =
+                    mutableListOf<String>()
 
                 for (i in 0 until array.length()) {
 
@@ -449,25 +365,28 @@ class MainActivity : ComponentActivity() {
                         cleanUrl(value)
 
                     if (clean.isNotEmpty()) {
-                        found.add(clean)
+                        newLinks.add(clean)
                     }
                 }
 
                 links.clear()
 
                 links.addAll(
-                    found
+                    newLinks
                         .distinct()
                         .sorted()
                 )
 
-                status =
-                    "${links.size} valid links found"
+                status.text =
+                    "Extraction complete"
+
+                showResults()
 
             } catch (e: Exception) {
 
-                status =
-                    "Extraction error: ${e.message}"
+                status.text =
+                    "Extraction error: " +
+                    (e.message ?: "unknown error")
             }
         }
     }
@@ -493,22 +412,15 @@ class MainActivity : ComponentActivity() {
         return url
     }
 
-    private fun filteredLinks(): List<String> {
+    private fun filtered(): List<String> {
 
         return links.filter { url ->
 
-            val httpsPass =
+            val httpsOK =
                 !httpsOnly ||
-                        url.startsWith("https://")
+                url.startsWith("https://")
 
-            val searchPass =
-                searchText.isBlank() ||
-                        url.contains(
-                            searchText,
-                            ignoreCase = true
-                        )
-
-            val externalPass =
+            val externalOK =
                 if (!externalOnly) {
                     true
                 } else {
@@ -521,59 +433,53 @@ class MainActivity : ComponentActivity() {
                             URI(url).host
 
                         !pageHost.isNullOrBlank() &&
-                                !linkHost.isNullOrBlank() &&
-                                pageHost != linkHost
+                        !linkHost.isNullOrBlank() &&
+                        pageHost != linkHost
 
                     } catch (_: Exception) {
                         false
                     }
                 }
 
-            httpsPass &&
-                    searchPass &&
-                    externalPass
+            httpsOK && externalOK
         }
     }
 
-    private fun deepScan() {
+    private fun showResults() {
 
-        status = "Deep scanning page..."
+        val list = filtered()
 
-        var count = 0
+        countText.text =
+            "${list.size} links found"
 
-        fun scroll() {
+        if (list.isEmpty()) {
 
-            if (count >= 7) {
+            results.text =
+                "No links extracted yet."
 
-                scanPage()
-                return
-            }
-
-            count++
-
-            browser?.evaluateJavascript(
-                "window.scrollTo(0,document.body.scrollHeight);",
-                null
-            )
-
-            Handler(
-                Looper.getMainLooper()
-            ).postDelayed(
-                {
-                    scroll()
-                },
-                1000
-            )
+            return
         }
 
-        scroll()
+        results.text =
+            list.joinToString(
+                separator = "\n\n"
+            )
     }
 
-    private fun copyAll() {
+    private fun copyLinks() {
+
+        val list = filtered()
+
+        if (list.isEmpty()) {
+
+            status.text =
+                "There are no links to copy"
+
+            return
+        }
 
         val text =
-            filteredLinks()
-                .joinToString("\n")
+            list.joinToString("\n")
 
         val clipboard =
             getSystemService(
@@ -587,40 +493,65 @@ class MainActivity : ComponentActivity() {
             )
         )
 
-        status =
-            "${filteredLinks().size} links copied"
+        status.text =
+            "${list.size} links copied"
     }
 
-    private fun writeFile(
-        uri: Uri,
-        text: String
-    ) {
+    private fun deepScan() {
 
-        try {
+        if (currentUrl.isBlank()) {
 
-            contentResolver
-                .openOutputStream(uri)
-                ?.use { output ->
+            status.text =
+                "Load a webpage first"
 
-                    output.write(
-                        text.toByteArray()
-                    )
-                }
+            return
+        }
 
-            status =
-                "File exported successfully"
+        status.text =
+            "Deep scanning..."
 
-        } catch (e: Exception) {
+        var count = 0
 
-            status =
-                "Export failed: ${e.message}"
+        fun nextScroll() {
+
+            if (count >= 8) {
+
+                scanPage()
+                return
+            }
+
+            count++
+
+            web.evaluateJavascript(
+                "window.scrollTo(0,document.body.scrollHeight);",
+                null
+            )
+
+            handler.postDelayed(
+                {
+                    nextScroll()
+                },
+                1000
+            )
+        }
+
+        nextScroll()
+    }
+
+    override fun onBackPressed() {
+
+        if (web.canGoBack()) {
+            web.goBack()
+        } else {
+            super.onBackPressed()
         }
     }
 
     override fun onDestroy() {
 
-        browser?.destroy()
-        browser = null
+        handler.removeCallbacksAndMessages(null)
+
+        web.destroy()
 
         super.onDestroy()
     }

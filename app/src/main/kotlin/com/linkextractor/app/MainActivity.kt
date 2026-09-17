@@ -5,12 +5,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Color
-import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -31,7 +29,7 @@ class MainActivity : Activity() {
     private lateinit var countText: TextView
     private lateinit var results: TextView
 
-    private val links = mutableListOf<String>()
+    private val links = mutableSetOf<String>()
 
     private var httpsOnly = false
     private var externalOnly = false
@@ -44,12 +42,33 @@ class MainActivity : Activity() {
 
         buildScreen()
 
-        val incoming = intent?.data?.toString()
+        val incomingUrl = getIncomingUrl()
 
-        if (!incoming.isNullOrBlank()) {
-            urlBox.setText(incoming)
-            loadPage(incoming)
+        if (!incomingUrl.isNullOrBlank()) {
+            urlBox.setText(incomingUrl)
+            loadPage(incomingUrl)
         }
+    }
+
+    private fun getIncomingUrl(): String? {
+
+        val dataUrl = intent?.dataString
+
+        if (!dataUrl.isNullOrBlank()) {
+            return dataUrl
+        }
+
+        val sharedText = intent?.getStringExtra(Intent.EXTRA_TEXT)
+
+        if (!sharedText.isNullOrBlank()) {
+            val match = Regex(
+                """https?://[^\s<>"']+"""
+            ).find(sharedText)
+
+            return match?.value ?: sharedText.trim()
+        }
+
+        return null
     }
 
     private fun buildScreen() {
@@ -82,7 +101,7 @@ class MainActivity : Activity() {
         urlBox = EditText(this)
 
         urlBox.hint = "https://example.com"
-        
+        urlBox.setSingleLine(true)
 
         urlRow.addView(
             urlBox,
@@ -102,7 +121,9 @@ class MainActivity : Activity() {
             var url = urlBox.text.toString().trim()
 
             if (url.isBlank()) {
+
                 status.text = "Enter a website address"
+
                 return@setOnClickListener
             }
 
@@ -161,6 +182,21 @@ class MainActivity : Activity() {
 
         buttonRow.addView(copy)
 
+        val clear = Button(this)
+
+        clear.text = "Clear"
+
+        clear.setOnClickListener {
+
+            links.clear()
+
+            showResults()
+
+            status.text = "Links cleared"
+        }
+
+        buttonRow.addView(clear)
+
         root.addView(buttonRow)
 
         val filterRow = LinearLayout(this)
@@ -173,7 +209,9 @@ class MainActivity : Activity() {
         https.text = "HTTPS only"
 
         https.setOnCheckedChangeListener { _, checked ->
+
             httpsOnly = checked
+
             showResults()
         }
 
@@ -184,7 +222,9 @@ class MainActivity : Activity() {
         external.text = "External only"
 
         external.setOnCheckedChangeListener { _, checked ->
+
             externalOnly = checked
+
             showResults()
         }
 
@@ -209,7 +249,7 @@ class MainActivity : Activity() {
 
         countText = TextView(this)
 
-        countText.text = "0 links"
+        countText.text = "0 links found"
         countText.textSize = 18f
         countText.setTextColor(Color.BLACK)
         countText.setPadding(12, 4, 12, 8)
@@ -223,6 +263,9 @@ class MainActivity : Activity() {
         web.settings.loadsImagesAutomatically = true
         web.settings.databaseEnabled = true
 
+        web.settings.allowFileAccess = true
+        web.settings.allowContentAccess = true
+
         web.webViewClient = object : WebViewClient() {
 
             override fun onPageFinished(
@@ -231,18 +274,24 @@ class MainActivity : Activity() {
             ) {
 
                 if (!url.isNullOrBlank()) {
+
                     currentUrl = url
+
                     urlBox.setText(url)
+
+                    addLink(url)
                 }
 
                 status.text = "Page loaded. Scanning..."
 
                 handler.postDelayed(
-    {
-        scanPage()
-    },
-    3000
-)
+                    {
+                        scanPage()
+                    },
+                    3000
+                )
+            }
+        }
 
         root.addView(
             web,
@@ -259,40 +308,64 @@ class MainActivity : Activity() {
         results.setTextColor(Color.DKGRAY)
         results.setPadding(12, 12, 12, 12)
 
-        val scroll = ScrollView(this)
+        val resultsScroll = ScrollView(this)
 
-        scroll.addView(results)
+        resultsScroll.addView(results)
 
         root.addView(
-            scroll,
+            resultsScroll,
             LinearLayout.LayoutParams(
                 -1,
                 0,
-                0f
+                1f
             )
         )
 
         setContentView(root)
+
+        showResults()
+    }
+
+    private fun addLink(value: String) {
+
+        val clean = cleanUrl(value)
+
+        if (clean.isNotEmpty()) {
+            links.add(clean)
+        }
     }
 
     private fun loadPage(url: String) {
 
-        currentUrl = url
+        var finalUrl = url.trim()
 
-urlBox.setText(url)
+        if (
+            !finalUrl.startsWith("http://") &&
+            !finalUrl.startsWith("https://")
+        ) {
+            finalUrl = "https://$finalUrl"
+        }
 
-status.text = "Loading page..."
+        currentUrl = finalUrl
 
-links.clear()
+        urlBox.setText(finalUrl)
 
-links.add(url)
+        status.text = "Loading page..."
 
-showResults()
+        links.clear()
 
-web.loadUrl(url)
+        addLink(finalUrl)
+
+        showResults()
+
+        web.loadUrl(finalUrl)
     }
 
     private fun scanPage() {
+
+        if (!::web.isInitialized) {
+            return
+        }
 
         status.text = "Extracting links..."
 
@@ -302,32 +375,53 @@ web.loadUrl(url)
 
                 var found = [];
 
+                function add(value) {
+
+                    if (!value) return;
+
+                    try {
+
+                        var absolute =
+                            new URL(value, document.baseURI).href;
+
+                        if (
+                            absolute.startsWith("http://") ||
+                            absolute.startsWith("https://")
+                        ) {
+                            found.push(absolute);
+                        }
+
+                    } catch (e) {
+
+                    }
+                }
+
                 document
                     .querySelectorAll("a[href], area[href]")
                     .forEach(function(e) {
-                        if (e.href) {
-                            found.push(e.href);
-                        }
+                        add(e.getAttribute("href"));
                     });
 
                 document
                     .querySelectorAll(
-                        "[data-url],[data-href],[data-link]"
+                        "[data-url], [data-href], [data-link], [data-src]"
                     )
                     .forEach(function(e) {
 
-                        if (e.dataset.url)
-                            found.push(e.dataset.url);
+                        add(e.getAttribute("data-url"));
+                        add(e.getAttribute("data-href"));
+                        add(e.getAttribute("data-link"));
+                        add(e.getAttribute("data-src"));
+                    });
 
-                        if (e.dataset.href)
-                            found.push(e.dataset.href);
-
-                        if (e.dataset.link)
-                            found.push(e.dataset.link);
+                document
+                    .querySelectorAll("form[action]")
+                    .forEach(function(e) {
+                        add(e.getAttribute("action"));
                     });
 
                 var html =
-                    document.documentElement.outerHTML;
+                    document.documentElement.outerHTML || "";
 
                 var regex =
                     /https?:\/\/[^\s"'<>\\]+/gi;
@@ -337,10 +431,19 @@ web.loadUrl(url)
                 while (
                     (match = regex.exec(html)) !== null
                 ) {
-                    found.push(match[0]);
+
+                    var value = match[0];
+
+                    value = value
+                        .replace(/&amp;/g, "&")
+                        .replace(/[),.;]+$/g, "");
+
+                    found.push(value);
                 }
 
-                return JSON.stringify(found);
+                return JSON.stringify(
+                    Array.from(new Set(found))
+                );
 
             })()
             """.trimIndent()
@@ -353,32 +456,19 @@ web.loadUrl(url)
 
                 val array = JSONArray(json)
 
-                val newLinks =
-                    mutableListOf<String>()
-
                 for (i in 0 until array.length()) {
 
                     val value =
                         array.optString(i)
 
-                    val clean =
-                        cleanUrl(value)
-
-                    if (clean.isNotEmpty()) {
-                        newLinks.add(clean)
-                    }
+                    addLink(value)
                 }
 
-                links.clear()
+                if (currentUrl.isNotBlank()) {
+                    addLink(currentUrl)
+                }
 
-                links.addAll(
-                    newLinks
-                        .distinct()
-                        .sorted()
-                )
-
-                status.text =
-                    "Extraction complete"
+                status.text = "Extraction complete"
 
                 showResults()
 
@@ -396,6 +486,7 @@ web.loadUrl(url)
         var url = value.trim()
 
         url = url.replace("\\/", "/")
+        url = url.replace("&amp;", "&")
 
         if (
             !url.startsWith("http://") &&
@@ -408,6 +499,11 @@ web.loadUrl(url)
         url = url.substringBefore("'")
         url = url.substringBefore("<")
         url = url.substringBefore(">")
+
+        url = url.replace(
+            Regex("""[),.;]+$"""),
+            ""
+        )
 
         return url
     }
@@ -422,8 +518,11 @@ web.loadUrl(url)
 
             val externalOK =
                 if (!externalOnly) {
+
                     true
+
                 } else {
+
                     try {
 
                         val pageHost =
@@ -434,15 +533,20 @@ web.loadUrl(url)
 
                         !pageHost.isNullOrBlank() &&
                         !linkHost.isNullOrBlank() &&
-                        pageHost != linkHost
+                        !linkHost.equals(
+                            pageHost,
+                            ignoreCase = true
+                        )
 
                     } catch (_: Exception) {
+
                         false
                     }
                 }
 
             httpsOK && externalOK
-        }
+
+        }.sorted()
     }
 
     private fun showResults() {
@@ -508,7 +612,7 @@ web.loadUrl(url)
         }
 
         status.text =
-            "Deep scanning..."
+            "Deep scanning page..."
 
         var count = 0
 
@@ -517,19 +621,38 @@ web.loadUrl(url)
             if (count >= 8) {
 
                 scanPage()
+
+                status.text =
+                    "Deep scan complete"
+
                 return
             }
 
             count++
 
             web.evaluateJavascript(
-                "window.scrollTo(0,document.body.scrollHeight);",
+                """
+                (function() {
+                    window.scrollTo(
+                        0,
+                        document.body.scrollHeight
+                    );
+                    return document.body.scrollHeight;
+                })()
+                """.trimIndent(),
                 null
             )
 
             handler.postDelayed(
                 {
-                    nextScroll()
+                    scanPage()
+
+                    handler.postDelayed(
+                        {
+                            nextScroll()
+                        },
+                        500
+                    )
                 },
                 1000
             )
@@ -541,8 +664,11 @@ web.loadUrl(url)
     override fun onBackPressed() {
 
         if (web.canGoBack()) {
+
             web.goBack()
+
         } else {
+
             super.onBackPressed()
         }
     }
@@ -551,7 +677,9 @@ web.loadUrl(url)
 
         handler.removeCallbacksAndMessages(null)
 
-        web.destroy()
+        if (::web.isInitialized) {
+            web.destroy()
+        }
 
         super.onDestroy()
     }

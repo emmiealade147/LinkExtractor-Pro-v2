@@ -82,7 +82,7 @@ class MainActivity : Activity() {
         urlBox = EditText(this)
 
         urlBox.hint = "https://example.com"
-        urlBox.singleLine = true
+        
 
         urlRow.addView(
             urlBox,

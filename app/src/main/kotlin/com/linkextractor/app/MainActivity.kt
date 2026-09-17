@@ -281,15 +281,17 @@ class MainActivity : Activity() {
 
         currentUrl = url
 
-        urlBox.setText(url)
+urlBox.setText(url)
 
-        status.text = "Loading page..."
+status.text = "Loading page..."
 
-        links.clear()
+links.clear()
 
-        showResults()
+links.add(url)
 
-        web.loadUrl(url)
+showResults()
+
+web.loadUrl(url)
     }
 
     private fun scanPage() {

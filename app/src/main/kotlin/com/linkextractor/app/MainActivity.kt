@@ -243,9 +243,6 @@ class MainActivity : Activity() {
     },
     3000
 )
-                )
-            }
-        }
 
         root.addView(
             web,

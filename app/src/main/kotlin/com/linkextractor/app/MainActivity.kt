@@ -238,10 +238,11 @@ class MainActivity : Activity() {
                 status.text = "Page loaded. Scanning..."
 
                 handler.postDelayed(
-                    {
-                        scanPage()
-                    },
-                    1500
+    {
+        scanPage()
+    },
+    3000
+)
                 )
             }
         }
